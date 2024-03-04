@@ -11,17 +11,44 @@ import { CS571PastaRoute } from './routes/pasta-route';
 import { CS571HurricanesRoute } from './routes/hurricanes-route';
 import { CS571TicketsRoute } from './routes/tickets-route';
 import { Ticket } from './model/ticket';
+import CS571IcePublicConfig from './config/public-config';
+import CS571IceSecretConfig from './config/secret-config';
+import { CS571UserService } from './services/user-service';
+import { CS571GetCommentsRoute } from './routes/get-comments-route';
+import { CS571IceDbConnector } from './services/db-connector';
+import { CS571IceTokenAgent } from './services/token-agent';
+import { CS571CreateCommentRoute } from './routes/create-comment-route';
+import { CS571LoginRoute } from './routes/login-route';
+import { CS571LogoutRoute } from './routes/logout-route';
 
 console.log("Welcome to ICE API!");
 
 const app: Express = express();
 app.use(cookies());
 
+// https://github.com/expressjs/express/issues/5275
+declare module "express-serve-static-core" {
+  export interface CookieOptions {
+    partitioned?: boolean;
+  }
+}
 
-const appBundle = CS571Initializer.init(app, {
+
+const appBundle = CS571Initializer.init<CS571IcePublicConfig, CS571IceSecretConfig>(app, {
   allowNoAuth: [],
   skipAuth: false
 });
+
+const users = JSON.parse(fs.readFileSync(appBundle.config.PUBLIC_CONFIG.PASSWORDS_LOC).toString()).reduce((acc: any, user: any) => {
+  acc[user.username] = user.password;
+  return acc;
+}, {})
+
+const db = new CS571IceDbConnector(appBundle.config);
+const ta = new CS571IceTokenAgent(appBundle.config);
+const userService = new CS571UserService(users);
+
+db.init();
 
 const chili = JSON.parse(fs.readFileSync('includes/chili.json').toString())
 const pasta = JSON.parse(fs.readFileSync('includes/pasta.json').toString())
@@ -34,6 +61,9 @@ const hurr = JSON.parse(fs.readFileSync('includes/hurr.json').toString()).map((h
     id: crypto.createHash('sha256').update(h.name + String(h.start_date) + String(h.end_date) + String(h.category) + String(h.wind_speed)).digest('hex').substring(0, 28)
   }
 })
+
+
+
 const tix = JSON.parse(fs.readFileSync('includes/tickets.json').toString()).map((t: any) => new Ticket(
   t.name,
   t.description,
@@ -48,7 +78,11 @@ appBundle.router.addRoutes([
   new CS571PastaRoute(pasta),
   new CS571PizzaRoute(pizza),
   new CS571HurricanesRoute(hurr),
-  new CS571TicketsRoute(tix)
+  new CS571TicketsRoute(tix),
+  new CS571GetCommentsRoute(db),
+  new CS571CreateCommentRoute(db, ta, appBundle.auth),
+  new CS571LoginRoute(userService, ta, appBundle.config),
+  new CS571LogoutRoute(appBundle.config)
 ])
 
 app.listen(appBundle.config.PORT, () => {
